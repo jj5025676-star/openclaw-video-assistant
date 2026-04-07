@@ -1,314 +1,169 @@
 ---
-name: movo_video_generator
-description: 使用 Movo 模板视频接口和 veo3.1 系列接口生成视频，自动轮询并返回结果链接。
-metadata: {"openclaw":{"emoji":"🎬","always":true}}
+name: movo-video-generator
+description: Generate videos with Movo template-video APIs and veo3.1 APIs from prompts or reference images. Use when the user wants to turn text, product photos, character images, or first/last-frame references into a video and needs the assistant to choose the right Movo mode, confirm before execution, submit the real request, poll until completion, and return the real result URL or failure.
 ---
 
-# Movo 生视频 Skill
+# Movo Video Generator
 
-当用户要把产品图、人物图、参考图或提示词变成视频时，使用这个 skill。
+Use this skill as a self-contained package. Do not depend on AGENTS.md, SOUL.md, TOOLS.md, or other workspace files.
 
-## 核心规则
+Before building any live request body, read `references/movo-request-reference.md`. Do not guess field names or payload shapes from memory.
 
-先理解需求，再确认，再执行。
+## Operating rules
 
-不要一上来直接选模型。你要先判断用户到底要哪种视频，再向用户做一次简短确认，确认后再发起请求。
+- Understand the request, choose the right mode, confirm once, then execute.
+- Never invent task ids, statuses, result URLs, or successful completion.
+- Never hardcode a real API key into files. Read `X-Movo-API-Key` from the current turn or ask for it.
+- If the API key is missing, ask only for the key.
+- Prefer real delivery over abstract advice. If execution is blocked, say exactly why.
+- Restore protocol accuracy before brevity. When a request involves payload assembly, polling fields, or result extraction, consult the bundled reference file first.
 
-执行顺序固定为：
+## Modes
 
-1. 理解用户要什么视频
-2. 判断是模板视频还是 veo3.1 系列
-3. 如果是 veo3.1 系列，判断该用哪个模型
-4. 向用户确认你的理解和选型
-5. 拿到确认后再执行
+Template video modes:
 
-## 能力名称与映射
+- `vid-ad-basic`: product-only ad video.
+- `vid-ad-story-24s`: ad-story video with product plus person.
+- `vid-operation-9x16`: operation or explainer video with product plus person.
+- `vid-talk-9x16`: straight presenter or talk-to-camera video.
 
-### 模板视频
+veo3.1 modes:
 
-- 纯广告视频 -> `vid-ad-basic`
-- 广告故事类视频 -> `vid-ad-story-24s`
-- 操作口播视频 -> `vid-operation-9x16`
-- 纯口播视频 -> `vid-talk-9x16`
+- `llm-veo31-fast`: default text-to-video or image-to-video.
+- `llm-veo31-fast-fl`: first-frame or first-plus-last-frame controlled video.
+- `llm-veo31`: slower higher-quality text-to-video or image-to-video.
+- `llm-veo31-fl`: slower higher-quality first-frame or first-plus-last-frame controlled video.
 
-### veo3.1 系列
+## Choose the mode
 
-- veo3.1-fast(文\图生视频) -> `llm-veo31-fast`
-- veo3.1-fast-fl(首帧\首尾帧生视频) -> `llm-veo31-fast-fl`
-- veo3.1(文\图生视频) -> `llm-veo31`
-- veo3.1-fl(首帧\首尾帧生视频) -> `llm-veo31-fl`
+- Use a template mode when the user clearly wants a packaged ad or presenter format.
+- Use a veo mode when the user wants freer prompt-led generation, more cinematic control, or explicit reference-image control.
+- Use a fast veo variant by default.
+- Upgrade from fast to non-fast only when the user explicitly prefers quality over speed.
+- Use an `-fl` mode only when the user explicitly wants the opening frame or both the opening and ending frames controlled.
 
-## 请求前检查
+## Confirm before execution
 
-执行前先确认：
+Before calling the API, send one short confirmation in this pattern:
 
-1. 用户已经提供 `X-Movo-API-Key`
-2. 你已经拿到本次所需的图片 URL 或 base64
-3. 你知道本次要走哪一个能力
-4. 你知道本次尺寸、时长或片段数量是否满足限制
-5. 你已经向用户确认过理解和选型
+```text
+I understand the goal is: <one-sentence summary>. I recommend using <mode> / <service id>. Please confirm and I will run it.
+```
 
-如果缺少 `X-Movo-API-Key`，停止执行并只问这一件事：
+If the request is still ambiguous, ask exactly one short follow-up question for the missing choice.
 
-`请提供你的 X-Movo-API-Key，我拿到后就开始发起视频任务。如果你还没有，可以前往 www.movo.do 免费获取。`
+## Required inputs
 
-## 请求头
+Before execution, make sure you have:
 
-所有请求都带：
+- `X-Movo-API-Key`
+- the chosen mode or service id
+- required images as a URL or a `data:image/...;base64,...` string
+- any required prompt or text fields
 
-- `X-Movo-API-Key: <请填写你的 X-Movo-API-Key>`
+For veo modes, `size` must be one of:
+
+- `720x1280`
+- `1280x720`
+
+If the user provides a local image path, read the file and convert it to a data URL before calling the API, or ask the user for a reachable URL if local file access is not available.
+
+## HTTP rules
+
+Send every request with:
+
+- `X-Movo-API-Key: <key>`
 - `Content-Type: application/json`
 
-## 模板视频能力说明
+Template video endpoints:
 
-### 纯广告视频
+- submit: `POST https://mtapi.movoai.top/v1/videos`
+- poll: `GET https://mtapi.movoai.top/v1/videos/search/{id}`
 
-- `service_id`: `vid-ad-basic`
-- 接口：`POST https://mtapi.movoai.top/v1/videos`
-- 轮询：`GET https://mtapi.movoai.top/v1/videos/search/{id}`
-- 图片要求：1 张产品图
-- `input_texts`：
-  1. 多少个 8 秒，要求 `>= 2`
-  2. 品牌名
-  3. 产品信息
+veo3.1 endpoints:
 
-### 广告故事类视频
+- submit: `POST https://mtapi.movoai.top/v1/llms/video`
+- poll: `GET https://mtapi.movoai.top/v1/llms/search/video/{conversation_id}`
 
-- `service_id`: `vid-ad-story-24s`
-- 接口：`POST https://mtapi.movoai.top/v1/videos`
-- 轮询：`GET https://mtapi.movoai.top/v1/videos/search/{id}`
-- 图片要求：产品图 + 人物图
-- `input_texts`：
-  1. 多少个 8 秒，要求 `>= 2`
-  2. 品牌名
-  3. 产品信息
+Prefer the bundled Python helper instead of assembling long `curl` commands in chat:
 
-### 操作口播视频
-
-- `service_id`: `vid-operation-9x16`
-- 接口：`POST https://mtapi.movoai.top/v1/videos`
-- 轮询：`GET https://mtapi.movoai.top/v1/videos/search/{id}`
-- 图片要求：产品图 + 人物图
-- `input_texts`：
-  1. 多少个 8 秒，只允许 `2` 或 `3`
-  2. 品牌名
-  3. 产品信息
-
-### 纯口播视频
-
-- `service_id`: `vid-talk-9x16`
-- 接口：`POST https://mtapi.movoai.top/v1/videos`
-- 轮询：`GET https://mtapi.movoai.top/v1/videos/search/{id}`
-- 图片要求：产品图 + 人物图
-- `input_texts`：
-  1. 多少个 8 秒，只允许 `1`、`2`、`3`
-  2. 品牌名
-  3. 产品信息
-
-## veo3.1 系列接口说明
-
-- 提交：`POST https://mtapi.movoai.top/v1/llms/video`
-- 实测轮询：`GET https://mtapi.movoai.top/v1/llms/search/video/{conversation_id}`
-
-参数规则：
-
-- `size` 仅允许：
-  - `720x1280`
-  - `1280x720`
-- `ref_images`：
-  - 普通图生视频最多 6 张
-  - 首帧模式 1 张
-  - 首尾帧模式 2 张
-
-## 在什么场景下使用什么模型
-
-### veo3.1-fast(文\图生视频)
-
-适用场景：
-
-- 用户要快速出片
-- 用户说“根据这张图生成一个视频”
-- 用户只有 1 张或多张参考图，但没有强调首帧/尾帧控制
-- 用户给一个提示词，希望直接生成视频
-- 用户上传 1 张图后说“生成一个 9:16 视频”
-
-默认建议：
-
-- 单图图生视频优先用它
-- 多图图生视频优先用它
-- 文生视频优先用它
-
-### veo3.1-fast-fl(首帧\首尾帧生视频)
-
-适用场景：
-
-- 用户明确说“图一作为首帧”
-- 用户说“用这张图做开头”
-- 用户说“首帧生成视频”
-- 用户说“图一首帧、图二尾帧”
-- 用户要控制开头画面，或同时控制开头和结尾画面
-
-默认建议：
-
-- 单张图明确作为首帧时优先用它
-- 两张图明确是首尾帧时优先用它
-
-### veo3.1(文\图生视频)
-
-适用场景：
-
-- 用户追求更高质量，接受更慢速度
-- 用户明确要求使用 `llm-veo31`
-- 用户不急，且希望更稳地生成文生/图生视频
-
-默认建议：
-
-- 只有用户强调质量优先时，再推荐它
-
-### veo3.1-fl(首帧\首尾帧生视频)
-
-适用场景：
-
-- 用户要首帧或首尾帧控制
-- 同时更在意质量而不是速度
-- 用户明确要求使用 `llm-veo31-fl`
-
-默认建议：
-
-- 当用户要首帧/首尾帧且强调质量优先时，使用它
-
-## 使用模型前必须先询问用户
-
-如果用户表达不够清楚，不要直接执行。先用一句话复述你的理解，再问一个必要的确认问题。
-
-推荐格式：
-
-```text
-我理解你的需求是：<你的理解>。
-我建议使用：<能力名称> / <service_id>。
-请确认是否按这个方式执行。
+```bash
+python {baseDir}/scripts/movo_video_api.py submit-template ...
+python {baseDir}/scripts/movo_video_api.py submit-veo ...
+python {baseDir}/scripts/movo_video_api.py poll --kind template --identifier 31 --watch
+python {baseDir}/scripts/movo_video_api.py poll --kind veo --identifier 123 --watch
 ```
 
-### 常见确认模板
+Use the request-body patterns from `references/movo-request-reference.md`. If a live response indicates a schema mismatch, let the Python helper retry with the documented compatibility body instead of inventing a third shape.
 
-#### 用户只说“生成一个视频”
+## Template mode notes
 
-```text
-我理解你是想生成一个视频，但目前还不明确是文生视频、图生视频，还是首帧/首尾帧视频。
-我建议你告诉我：是纯提示词生成，还是基于图片生成；如果基于图片，是单张图、多张参考图，还是首帧/首尾帧模式。
-请确认后我再执行。
-```
+- `vid-ad-basic` needs one product image.
+- `vid-ad-story-24s` needs a product image and a person image.
+- `vid-operation-9x16` needs a product image and a person image.
+- `vid-talk-9x16` needs a product image and a person image.
+- For `input_texts`, collect the fields required by the chosen template such as brand name, product info, and segment count. If the user has not given enough information, ask only for the missing fields.
+- Template bodies normally use `service_id`, `input_image_urls`, and `input_texts`. Follow the exact examples in the reference file.
 
-#### 用户上传 1 张图并说“生成 9:16 视频”
+## veo mode notes
 
-```text
-我理解你是想基于这张图生成一个 9:16 竖版视频。
-我建议使用 veo3.1-fast(文\图生视频)，尺寸为 720x1280。
-如果你是想把这张图明确作为首帧，请告诉我，我会改用 veo3.1-fast-fl(首帧\首尾帧生视频)。
-请确认是否按这个方式执行。
-```
+- Standard veo mode can use only a prompt or a prompt plus reference images.
+- Standard image-to-video mode can use up to 6 reference images.
+- First-frame mode uses 1 image.
+- First-plus-last-frame mode uses 2 images.
+- Use `720x1280` for vertical output and `1280x720` for horizontal output unless the user says otherwise.
+- Prefer the `messages` plus `ref_images` body shown in the reference file for `/v1/llms/video`.
+- If the live API rejects `messages` or `ref_images` with a validation error, retry once with the compatibility body that uses `input_texts` and `input_image_urls`.
 
-#### 用户说“图一作为首帧”
+## Execute and poll
 
-```text
-我理解你是想让图一作为首帧来生成视频。
-我建议使用 veo3.1-fast-fl(首帧\首尾帧生视频)。
-如果你还要指定尾帧，请再给我第二张图；否则我按单张首帧模式执行。
-请确认是否开始。
-```
+After submission:
 
-#### 用户说“图一首帧，图二尾帧”
+- For template modes, read `data.id` from the response.
+- For veo modes, prefer `data.conversation_id`. If it is missing, fall back to `data.user_sequence_id` only as a secondary identifier.
+- Poll every 60 seconds until a terminal state is reached.
+- Use `scripts/movo_video_api.py poll ... --watch` for polling so long prompts or image payloads do not leak back into a giant shell command.
 
-```text
-我理解你是想用图一做首帧、图二做尾帧来生成视频。
-我建议使用 veo3.1-fast-fl(首帧\首尾帧生视频) 的双图模式。
-请确认尺寸是 720x1280 还是 1280x720，我确认后就开始执行。
-```
+Template terminal states:
 
-## 图片输入规则
+- `success`
+- `failed`
+- `error`
+- `cancelled`
 
-模板视频和 veo3.1 系列都支持：
+veo terminal states:
 
-- 图片 URL
-- `data:image/...;base64,...`
+- `completed`
+- `failed`
+- `error`
+- `cancelled`
 
-如果用户给的是本地文件路径，先读取并转成 base64，或先上传成可访问 URL 再调用接口。
+Success extraction:
 
-## 执行规范
+- Template modes: read `output_video_urls`.
+- veo modes: extract from `messages[*].video.url`.
+- If veo completion returns a different but obviously equivalent video field in the live response, report what the API actually returned and note the difference.
 
-### 模板视频
+## Report format
 
-提交成功后：
+Always report:
 
-- 从返回体里读取 `data.id`
-- 每 60 秒轮询一次
-- 轮询到 `success`、`failed`、`error`、`cancelled` 之一就停止
-- 成功后读取 `output_video_urls`
+- selected mode and service or model id
+- whether submission succeeded
+- returned ids
+- final status
+- final video URL or exact failure reason
 
-### veo3.1 系列
+## Error handling
 
-提交成功后：
+- `524 Origin Time-out`: treat this as a submit-time timeout, explain it, and offer one retry.
+- `404` during polling: verify that the poll endpoint and identifier type are correct.
+- failed task with no detailed reason: say the API did not return a more specific failure reason.
+- shell error `Argument list too long`: stop using inline `curl` and switch to the bundled Python helper immediately.
 
-- 优先读取 `data.conversation_id`
-- 若没有，再退回读取 `data.user_sequence_id`
-- 每 60 秒轮询一次
-- 使用轮询地址：
-  - `https://mtapi.movoai.top/v1/llms/search/video/{conversation_id}`
-- 轮询到 `completed`、`failed`、`error`、`cancelled` 之一就停止
-- 成功后从 `messages[*].video.url` 提取视频链接
+## Important reminders
 
-## 默认汇报格式
-
-至少向用户汇报：
-
-1. 使用的能力名称和 `service_id`
-2. 提交是否成功
-3. 返回了哪些 ID
-4. 最终状态
-5. 视频链接或失败原因
-
-示例：
-
-```text
-能力：veo3.1-fast(文\图生视频)（llm-veo31-fast）
-message_id：596
-user_sequence_id：13
-conversation_id：13
-状态：completed
-结果：
-- https://...
-```
-
-## 错误处理
-
-- `524 Origin Time-out`
-  - 视为提交阶段超时
-  - 可向用户说明后重试一次
-
-- `404`
-  - 先检查轮询地址是否用错
-
-- 任务状态 `failed`
-  - 不要伪造结果
-  - 原样说明失败
-  - 若接口未给出更具体原因，明确写“接口未返回更具体失败原因”
-
-## 选择建议
-
-- 用户说“做一个广告片”但没有强剧情，一般先用 `纯广告视频`
-- 用户说“带人物讲故事的广告”，用 `广告故事类视频`
-- 用户说“演示操作、讲解步骤”，用 `操作口播视频`
-- 用户说“真人讲解、主播口播”，用 `纯口播视频`
-- 用户说“自由生成、镜头感、品牌感、参考图控制”，用 veo3.1 系列
-- 用户上传 1 张图并说“生成 9:16 视频”，默认建议 `veo3.1-fast(文\图生视频)`
-- 用户说“图一为首帧”，默认建议 `veo3.1-fast-fl(首帧\首尾帧生视频)`
-- 用户说“图一首帧、图二尾帧”，默认建议 `veo3.1-fast-fl(首帧\首尾帧生视频)` 双图模式
-- 用户强调质量优先，再考虑 `veo3.1(文\图生视频)` 或 `veo3.1-fl(首帧\首尾帧生视频)`
-
-## 重要提醒
-
-- 不要在任何固定文档中写入真实 API Key
-- 必须让用户填写 `X-Movo-API-Key`
-- 如果用户没有 `X-Movo-API-Key`，提醒其前往 `www.movo.do` 免费获取
-- 模板视频与 veo3.1 系列的轮询地址不同，不要混用
-- 文档说明若与实测冲突，以实测可用接口为准
+- Do not mix template polling endpoints with veo polling endpoints.
+- If documentation and live behavior conflict, follow the live API behavior that actually works.
+- If execution cannot complete, say so plainly instead of fabricating a result.
+- The bundled reference file is part of this skill. Use it whenever body shape or field naming matters.
