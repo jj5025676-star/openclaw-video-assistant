@@ -1,96 +1,40 @@
-# OpenClaw Video Assistant
+# openclaw-video-assistant
 
-这是一个 `workspace 型` OpenClaw 视频助理包，不是普通的单 skill 包。
+This repository is now a single OpenClaw skill repository.
 
-它的正确用法不是把整个目录复制到 `workspace/skills`，而是：
+The skill content is kept in sync with the version currently used by bot4 in the local OpenClaw workspace:
 
-1. 保持整个目录原样存在
-2. 新建一个 OpenClaw agent
-3. 让这个 agent 的 `workspace` 直接指向当前目录
+- Active local source:
+  - `D:\openclaw_workspace_bot4\skills\movo-video-generator`
 
-这样这个 agent 就会把下面这些文件一起当作工作区规则来使用：
+## What is included
 
-- `AGENTS.md`
-- `SOUL.md`
-- `TOOLS.md`
-- `skills/movo_video_generator/SKILL.md`
+- [SKILL.md](./SKILL.md)
+- [agents/openai.yaml](./agents/openai.yaml)
+- [references/movo-request-reference.md](./references/movo-request-reference.md)
+- [scripts/movo_video_api.py](./scripts/movo_video_api.py)
 
-## 最简单的用法
+## What this skill does
 
-### 1. 只创建一个本地 agent
+`movo-video-generator` submits Movo template-video and veo3.1 video jobs, then polls until completion using the bundled Python helper instead of long inline `curl` commands.
 
-在 PowerShell 里进入本目录后执行：
+It supports:
 
-```powershell
-.\install_video_agent.ps1
+- template video modes such as `vid-ad-basic`, `vid-ad-story-24s`, `vid-operation-9x16`, `vid-talk-9x16`
+- veo3.1 modes such as `llm-veo31-fast`, `llm-veo31-fast-fl`, `llm-veo31`, `llm-veo31-fl`
+- stable polling through `scripts/movo_video_api.py`
+
+## Recommended installation
+
+Install this skill into the current OpenClaw workspace's `skills` directory, not as a global system skill.
+
+Example target:
+
+```text
+<current-workspace>/skills/movo-video-generator
 ```
 
-默认会创建：
+## Notes
 
-- `agentId = video-agent`
-
-并自动重启 OpenClaw gateway。
-
-### 2. 创建 agent 并绑定到某个现有飞书机器人
-
-```powershell
-.\install_video_agent.ps1 -AccountId bot3
-```
-
-这会：
-
-- 创建或更新 `video-agent`
-- 把该 agent 的 `workspace` 指向当前目录
-- 把飞书 `accountId=bot3` 绑定到 `video-agent`
-- 重启 OpenClaw gateway
-
-## 更灵活的 Python 方式
-
-```powershell
-python .\install_video_agent.py --agent-id video-agent --account-id bot3 --restart
-```
-
-可用参数：
-
-- `--agent-id`
-- `--account-id`
-- `--config`
-- `--restart`
-- `--no-restart`
-
-## 适合谁
-
-适合：
-
-- 想把这整个目录当成一个独立视频助理 workspace 来用
-- 想给某个飞书机器人单独绑一个视频生成 agent
-
-不适合：
-
-- 直接把整个目录当普通 skill 安装到 `workspace/skills`
-
-## 当前生效原理
-
-安装器会自动修改当前 OpenClaw 生效配置：
-
-- WSL2 配置文件：`/home/z852963/.openclaw/openclaw.json`
-
-它会：
-
-1. 在 `agents.list` 中新增或更新一个 agent
-2. 把 `workspace` 指向当前目录
-3. 如果你传了 `accountId`，就新增或更新对应 `bindings`
-4. 重启 `openclaw-gateway.service`
-
-## 推荐方式
-
-从用户角度，最简单的方式就是：
-
-```powershell
-.\install_video_agent.ps1 -AccountId bot3
-```
-
-前提是：
-
-- `bot3` 已经是 OpenClaw 当前配置里存在的飞书账号
-- WSL2 里的 OpenClaw 正在作为正式运行环境
+- This repository no longer ships the old workspace wrapper files or installer scripts.
+- The repository is intentionally aligned to the skill currently used in OpenClaw, not to the earlier `video-agent` workspace package layout.
